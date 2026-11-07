@@ -1,0 +1,61 @@
+# Release verification
+
+## Automated result — 7 November 2026
+
+The local macOS run loads the built Manifest V3 extension into a fresh persistent
+Chromium profile. All HTTP requests in this profile are fulfilled with controlled
+HTML fixtures; no live account is accessed. The clipboard keyboard test uses the
+test browser's clipboard. Fixtures model static inputs, delayed/lazy mounting,
+and a separate image-editor dialog; they do not establish current LinkedIn
+selector compatibility.
+
+28 tests passed. Strict TypeScript checking and the production bundle budget
+passed. The final package command reruns the checks and validates ZIP contents.
+`npm audit` reports dependency advisories at the time it is run; it is not a
+guarantee about future vulnerabilities.
+
+## Manual checklist — pending
+
+Before calling this live-site verified, run these on current Chrome on both a
+Mac and Windows machine, signed into a disposable/test post draft. Do not publish
+as part of this checklist.
+
+1. Load `dist/` using Developer mode → Load unpacked. Refresh LinkedIn.
+2. Open Start a post. Write a sentence and paste two different screenshots with
+   Cmd+V / Ctrl+V. Confirm the text stays intact and the tray shows both images.
+3. Remove one image, paste a third, click Add images to post, and complete Next
+   if shown. Confirm exactly two native images in the correct order.
+4. Paste another image and add it. Verify earlier native attachments survive
+   without duplication. Repeat with a manually selected native attachment first.
+5. Repeat in the full-page `/sharing/compose/` composer and its image editor.
+6. Check image pasting in comments/messages follows LinkedIn's own behavior.
+   Paste plain text into the post while a stack is open; it must remain normal.
+7. Verify a 20-image batch, oversized-image feedback, removal/clear, and Save.
+8. Close the composer with a stack open, then reopen it. Old images must be gone.
+9. Confirm the LinkedIn uploader displays native previews before any publishing
+   action. Check uploading an image does not open an unexpected OS file picker.
+10. Discard the test draft without posting. Record browser version, OS, language,
+    and which composer layout was exercised.
+
+## Performance spot check
+
+Use Chrome DevTools Performance on a LinkedIn tab with PasteStack enabled, then
+disabled. Record an idle interval, paste a typical screenshot, and clear it.
+There should be no PasteStack polling/timer activity at idle. Thumbnail work
+should occur only on paste; heap-held files/URLs should be released after Clear
+and garbage collection. Record actual numbers before making CPU/RAM claims.
+
+## Release commands
+
+```sh
+npm ci
+npx playwright install chromium
+npm run package
+npm audit --audit-level=high
+git diff --check
+git status --short
+```
+
+Increment both `package.json` and `public/manifest.json` together for releases.
+Build output and ZIPs are ignored by Git; source, lockfile, icons, tests, and docs
+are committed. No Web Store upload or GitHub push is part of the local build.
