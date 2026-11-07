@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>PasteStack — controlled composer fixture</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 48px 16px; background: #f3f2ef; color: #242424; font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 600px; margin: auto; }
+  [role=dialog] { padding: 24px; border: 1px solid #ddd; border-radius: 16px; background: white; box-shadow: 0 8px 40px #0001; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  .person { display: flex; gap: 12px; align-items: center; margin: 20px 0; }
+  .avatar { width: 44px; height: 44px; border-radius: 50%; background: #e6edf7; display: grid; place-items: center; color: #0a66c2; font-weight: 600; }
+  small { color: #666; }
+  .ql-editor { min-height: 112px; padding: 8px 0; outline: none; white-space: pre-wrap; }
+  button { padding: 8px 18px; border: 1px solid #ccc; border-radius: 20px; background: white; color: #444; font: inherit; cursor: pointer; }
+  .native-footer { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid #ddd; padding-top: 20px; }
+  #post { background: #0a66c2; color: white; border: 0; }
+  .native-images { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
+  .native-images figure { margin: 0; padding: 8px; border: 1px solid #ddd; border-radius: 8px; }
+</style>
+<main>
+  <section role="dialog" aria-label="Create a post">
+    <h1>Create a post</h1>
+    <div class="person"><div class="avatar">Y</div><div><b>Your LinkedIn post</b><br><small>Post to anyone</small></div></div>
+    <div class="share-creation-state">
+      <div class="ql-editor" role="textbox" contenteditable="true" aria-label="What do you want to talk about?">A few things I wanted to share.</div>
+      <div class="native-images" aria-label="LinkedIn images"></div>
+      <div class="native-footer"><button id="media" aria-label="Media">Media</button><button id="post">Post</button></div>
+    </div>
+    <button id="close">Close composer</button>
+  </section>
+  <div class="comments-comment-box"><div contenteditable="true" role="textbox" aria-label="Add a comment"></div></div>
+  <div class="msg-form"><div contenteditable="true" role="textbox" aria-label="Write a message"></div></div>
+</main>
+<script>
+  // This is a behavioral fixture, not a snapshot of LinkedIn's private DOM.
+  const mode = new URLSearchParams(location.search).get('mode') || 'static';
+  window.uploads = [];
+  window.published = 0;
+  window.nativePastes = 0;
+  document.addEventListener('paste', () => window.nativePastes++);
+  document.querySelector('#post').onclick = () => window.published++;
+  document.querySelector('#close').onclick = () => document.querySelector('[role=dialog]').remove();
+  const addNative = (file, root) => {
+    const figure = document.createElement('figure');
+    figure.textContent = file.name + ' ';
+    const remove = document.createElement('button');
+    remove.setAttribute('aria-label', 'Remove image');
+    remove.textContent = 'Remove';
+    remove.onclick = () => figure.remove();
+    figure.append(remove);
+    root.querySelector('.native-images').append(figure);
+  };
+  const makeInput = (root) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg,image/gif';
+    input.multiple = true;
+    input.hidden = true;
+    input.addEventListener('change', () => {
+      window.uploads.push(Array.from(input.files, file => ({ name: file.name, type: file.type, size: file.size })));
+      Array.from(input.files).forEach(file => addNative(file, root));
+    });
+    root.append(input);
+    return input;
+  };
+  const root = document.querySelector('[role=dialog]');
+  if (mode === 'static' || mode === 'existing') makeInput(root);
+  if (mode === 'existing') addNative({ name: 'already-selected.png' }, root);
+  document.querySelector('#media').onclick = () => {
+    if (mode === 'broken') return;
+    if (mode === 'new-dialog') {
+      const dialog = document.createElement('section');
+      dialog.setAttribute('role', 'dialog');
+      dialog.setAttribute('aria-label', 'Edit images');
+      dialog.innerHTML = '<h2>Edit images</h2><div class="native-images"></div><button>Add images</button><button>Next</button>';
+      document.body.append(dialog);
+      makeInput(dialog).click();
+    } else {
+      const mount = () => makeInput(root).click();
+      if (mode === 'delayed') setTimeout(mount, 80);
+      else mount();
+    }
+  };
+</script>
+</html>

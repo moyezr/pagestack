@@ -2,7 +2,7 @@
 const DIALOG = '[role="dialog"], dialog, .share-box-modal';
 const EDITOR = '[contenteditable="true"][role="textbox"], .ql-editor[contenteditable="true"], [contenteditable="true"][data-placeholder]';
 const EXCLUDED = '.comments-comment-box, .comments-comment-texteditor, .msg-form, [data-pastestack]';
-const ADD_LABELS = /^(add(?: more)? (?:images?|photos?)|add media|add)$/i;
+const ADD_LABELS = /^(add(?: more)? (?:images?|photos?)|add media)$/i;
 const MEDIA_LABELS = /^(media|add (?:a )?(?:photo|image)|add (?:photos|images|media)|upload (?:photos|images)|upload from computer|create a photo post)$/i;
 
 export interface Composer {
@@ -39,14 +39,16 @@ function isPostRoot(root: HTMLElement): boolean {
 
 export function imageInput(root: ParentNode): HTMLInputElement | null {
   return Array.from(root.querySelectorAll<HTMLInputElement>('input[type="file"]')).find((input) =>
-    !input.disabled && input.multiple && /image\//i.test(input.accept) &&
+    input.isConnected && !input.disabled && input.multiple && /image\//i.test(input.accept) &&
     !input.parentElement?.closest('[hidden], [aria-hidden="true"]'),
   ) ?? null;
 }
 
 function isMediaRoot(root: HTMLElement): boolean {
+  const actions = Array.from(root.querySelectorAll('button, label'));
   return !!root.querySelector('.image-sharing-detour-container') || (
-    !!imageInput(root) && Array.from(root.querySelectorAll('button, label')).some((button) => ADD_LABELS.test(label(button)))
+    !!imageInput(root) && (actions.some((button) => ADD_LABELS.test(label(button))) ||
+      (actions.some((button) => /^add$/i.test(label(button))) && actions.some((button) => /^next$/i.test(label(button)))))
   );
 }
 
@@ -88,6 +90,7 @@ function mediaAction(root: HTMLElement): HTMLElement | null {
     .filter((button) => !button.closest('[data-pastestack]') && visible(button) &&
       !button.matches(':disabled, [aria-disabled="true"]'));
   return actions.find((button) => ADD_LABELS.test(label(button))) ??
+    (isMediaRoot(root) ? actions.find((button) => /^add$/i.test(label(button))) : null) ??
     actions.find((button) => MEDIA_LABELS.test(label(button))) ??
     root.querySelector<HTMLElement>('button.share-promoted-detour-button[aria-label*="photo" i]');
 }
@@ -139,7 +142,7 @@ export async function attachImages(composer: Composer, files: readonly File[], s
       const local = imageInput(composer.root);
       if (local) return local;
       for (const dialog of document.querySelectorAll<HTMLElement>(DIALOG)) {
-        if (!previousDialogs.has(dialog) && visible(dialog)) {
+        if (!previousDialogs.has(dialog) && visible(dialog) && isMediaRoot(dialog)) {
           const input = imageInput(dialog);
           if (input) return input;
         }
