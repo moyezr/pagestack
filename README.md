@@ -45,6 +45,9 @@ folder. Chrome cannot load the ZIP itself. No Chrome Web Store listing exists ye
 The Add button includes your image count. Repeating the exact same image is
 allowed intentionally. The tray never combines photos into a single bitmap.
 After handoff, use LinkedIn's own controls to remove, reorder, or edit attachments.
+When adding a later batch to an existing album, LinkedIn may insert it after the
+currently selected photo. Use its native reorder controls if you want a different
+order; PasteStack preserves the existing photos and leaves native ordering intact.
 
 PNG, JPEG, and GIF are supported, up to **20 images per post**, **5 MB per image**.
 Counts include native attachments when their remove controls are identifiable;
@@ -101,19 +104,23 @@ Targets current desktop Chrome on macOS and Windows; Chromium browsers may also
 work. No mobile, Safari, or Firefox support is claimed. Chrome 120 is the API
 compatibility floor; use an up-to-date browser.
 
-**Automated verification:** 28 browser tests passed locally on macOS using the
+**Automated verification:** 31 browser tests passed locally on macOS using the
 actual Manifest V3 extension loaded in Playwright's bundled Chromium. Coverage
 includes a real OS clipboard paste via Cmd+V, real FileList/change-event handoff,
 repeated and rapid pastes, native image preservation, lazy/modal upload inputs,
 object-URL cleanup, fallback downloads, and text/comment/message exclusions.
 
-**Live LinkedIn upload verification remains pending.** Test fixtures exercise the
-integration contract; they are not a copy of LinkedIn's current private DOM.
-LinkedIn uses several layouts and experiments, and there is no public composer
-plugin API. The initial adapter targets legacy share-box dialogs and a semantic
-full-page composer. Toolbar labels currently target English. Unknown layouts
-should be treated as unsupported until verified. Windows/Linux CI is configured
-but has not run before this repository is pushed.
+**Live verified on 8 November 2026:** in signed-in Chrome 156 on macOS, with
+LinkedIn in English, separate real Cmd+V pastes produced one two-image native
+post preview. A later third paste joined the same post while retaining both
+earlier photos. Plain-text paste also worked. Nothing was published. This test
+caught and fixed LinkedIn's transient body-mounted upload input and its
+existing-album **Edit → Add** flow; regression tests cover both.
+
+This verifies the current `/sharing/compose` flow, not every LinkedIn experiment.
+Toolbar labels currently target English. Unknown layouts should be treated as
+unsupported until verified. Windows/Linux CI is configured but has not run before
+this repository is pushed. See [the verification record](docs/VERIFY.md) for scope.
 
 ## If images do not attach
 
