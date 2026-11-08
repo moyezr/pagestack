@@ -49,7 +49,18 @@
     remove.textContent = 'Remove';
     remove.onclick = () => figure.remove();
     figure.append(remove);
-    root.querySelector('.native-images').append(figure);
+    if (mode === 'album-edit') {
+      figure.setAttribute('role', 'button');
+      figure.setAttribute('aria-roledescription', 'sortable');
+      const thumbnail = document.createElement('img');
+      thumbnail.alt = 'Native thumbnail';
+      thumbnail.onclick = () => window.selectedPhoto = figure;
+      figure.prepend(thumbnail);
+      const selected = window.selectedPhoto;
+      if (selected?.isConnected) selected.after(figure);
+      else root.querySelector('.native-images').append(figure);
+      window.selectedPhoto = figure;
+    } else root.querySelector('.native-images').append(figure);
   };
   const makeInput = (root) => {
     const input = document.createElement('input');
@@ -66,10 +77,39 @@
   };
   const root = document.querySelector('[role=dialog]');
   if (mode === 'static' || mode === 'existing') makeInput(root);
-  if (mode === 'existing') addNative({ name: 'already-selected.png' }, root);
+  if (mode === 'existing' || mode === 'album-edit') addNative({ name: 'already-selected.png' }, root);
+  if (mode === 'album-edit') {
+    addNative({ name: 'second-existing.png' }, root);
+    window.selectedPhoto = root.querySelector('figure');
+    const controls = document.createElement('div');
+    document.querySelector('#media').replaceWith(controls);
+    controls.innerHTML = '<button id="media" aria-label="Edit">Edit</button><button aria-label="Close">Close</button>';
+  }
   document.querySelector('#media').onclick = () => {
     if (mode === 'broken') return;
-    if (mode === 'new-dialog') {
+    if (mode === 'album-edit') {
+      const media = document.createElement('main');
+      media.innerHTML = '<h2>Editor</h2><div class="native-images"></div><button aria-label="Add">Add</button><button>Next</button>';
+      media.querySelector('.native-images').replaceWith(root.querySelector('.native-images'));
+      root.closest('main').replaceWith(media);
+      media.querySelector('button[aria-label=Add]').onclick = () => {
+        const input = makeInput(media);
+        document.body.append(input);
+        input.click();
+      };
+    } else if (mode === 'body-input' || mode === 'body-input-before-mount') {
+      const media = document.createElement('main');
+      media.innerHTML = '<h2>Editor</h2><div role="region" aria-label="Add media. Drag and drop media files here, or use the button to choose files."><div class="native-images"></div><button>Upload from computer</button></div><button>Back</button><button>Next</button>';
+      const select = () => {
+        const input = makeInput(media);
+        document.body.append(input);
+        input.click();
+      };
+      media.querySelector('button').onclick = select;
+      if (mode === 'body-input') root.closest('main').replaceWith(media);
+      select();
+      if (mode === 'body-input-before-mount') root.closest('main').replaceWith(media);
+    } else if (mode === 'new-dialog') {
       const dialog = document.createElement('section');
       dialog.setAttribute('role', 'dialog');
       dialog.setAttribute('aria-label', 'Edit images');

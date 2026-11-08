@@ -4,6 +4,8 @@ const EDITOR = '[contenteditable="true"][role="textbox"], .ql-editor[contentedit
 const EXCLUDED = '.comments-comment-box, .comments-comment-texteditor, .msg-form, [data-pastestack]';
 const ADD_LABELS = /^(add(?: more)? (?:images?|photos?)|add media)$/i;
 const MEDIA_LABELS = /^(media|add (?:a )?(?:photo|image)|add (?:photos|images|media)|upload (?:photos|images)|upload from computer|create a photo post)$/i;
+const COMPOSE_PATH = /^\/sharing\/compose\/?$/;
+const MEDIA_REGION = '[role="region"][aria-label^="Add media."]';
 
 export interface Composer {
   root: HTMLElement;
@@ -52,6 +54,21 @@ function isMediaRoot(root: HTMLElement): boolean {
   );
 }
 
+function fullPageMediaRoot(): HTMLElement | null {
+  if (!COMPOSE_PATH.test(location.pathname)) return null;
+  const region = document.querySelector<HTMLElement>(MEDIA_REGION);
+  if (region && visible(region)) return region.closest<HTMLElement>('main, [role="main"]') ?? region.parentElement;
+  // Once photos exist, the drop zone becomes an album editor: Editor heading,
+  // Add control, and Next. Its generated CSS classes are intentionally ignored.
+  const heading = Array.from(document.querySelectorAll<HTMLElement>('h1, h2, [role="heading"]'))
+    .find((element) => element.textContent?.trim() === 'Editor' && visible(element));
+  for (let root = heading?.parentElement; root && root !== document.body; root = root.parentElement) {
+    const buttons = Array.from(root.querySelectorAll('button'));
+    if (buttons.some((button) => label(button) === 'Add') && buttons.some((button) => label(button) === 'Next')) return root;
+  }
+  return null;
+}
+
 export function findComposer(target: EventTarget | null): Composer | null {
   if (!(target instanceof Element) || target.closest(EXCLUDED)) return null;
   const dialog = target.closest<HTMLElement>(DIALOG);
@@ -66,10 +83,13 @@ export function findComposer(target: EventTarget | null): Composer | null {
     return null;
   }
   // LinkedIn also has a full-page composer. Never treat the feed as a composer.
-  if (/^\/sharing\/compose\/?$/.test(location.pathname)) {
+  if (COMPOSE_PATH.test(location.pathname)) {
     const root = target.closest<HTMLElement>('main, [role="main"]') ?? document.body;
     const editor = postEditor(root);
     if (editor && (editor.contains(target) || target === editor)) return { root, editor };
+    const media = fullPageMediaRoot();
+    if (media && !target.closest('input, textarea, [contenteditable="true"]') &&
+      (media.contains(target) || target === document.body)) return { root: media, editor: null };
   }
   return null;
 }
@@ -90,8 +110,10 @@ function mediaAction(root: HTMLElement): HTMLElement | null {
     .filter((button) => !button.closest('[data-pastestack]') && visible(button) &&
       !button.matches(':disabled, [aria-disabled="true"]'));
   return actions.find((button) => ADD_LABELS.test(label(button))) ??
-    (isMediaRoot(root) ? actions.find((button) => /^add$/i.test(label(button))) : null) ??
+    (isMediaRoot(root) || fullPageMediaRoot() === root ? actions.find((button) => /^add$/i.test(label(button))) : null) ??
     actions.find((button) => MEDIA_LABELS.test(label(button))) ??
+    actions.find((button) => label(button) === 'Edit' &&
+      button.parentElement?.querySelector('button[aria-label="Close"]')) ??
     root.querySelector<HTMLElement>('button.share-promoted-detour-button[aria-label*="photo" i]');
 }
 
@@ -121,7 +143,10 @@ export async function attachImages(composer: Composer, files: readonly File[], s
   // this operation, and never intercept another uploader's file input.
   await new Promise<void>((resolve, reject) => {
     const previousDialogs = new Set(document.querySelectorAll(DIALOG));
+    const previousInputs = new Set(document.querySelectorAll('input[type="file"]'));
     let settled = false;
+    let activating = false;
+    const attemptedActions = new Set<HTMLElement>();
     let timeout: ReturnType<typeof setTimeout>;
     const operation = new AbortController();
     const finish = (input?: HTMLInputElement, error?: unknown) => {
@@ -147,11 +172,34 @@ export async function attachImages(composer: Composer, files: readonly File[], s
           if (input) return input;
         }
       }
+      // LinkedIn's current React composer appends a transient file input directly
+      // to <body>, outside the composer root, before invoking input.click(). Only
+      // consider new inputs during this user-requested Media handoff.
+      if (fullPageMediaRoot() || (activating && COMPOSE_PATH.test(location.pathname))) {
+        const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('body > input[type="file"]'))
+          .filter((input) => !previousInputs.has(input) && input.multiple && !input.disabled && /image\//i.test(input.accept));
+        if (inputs.length === 1) return inputs[0]!;
+      }
       return null;
+    };
+    const activate = (button: HTMLElement) => {
+      attemptedActions.add(button);
+      activating = true;
+      try { button.click(); } finally { activating = false; }
     };
     const check = () => {
       const input = candidate();
-      if (input) finish(input);
+      if (input) { finish(input); return; }
+      // Editing an existing album takes two native steps: Edit, then Add.
+      const media = fullPageMediaRoot();
+      const add = media && mediaAction(media);
+      if (add && !attemptedActions.has(add) && /^(add|upload from computer)$/i.test(label(add))) {
+        try {
+          activate(add);
+          const created = candidate();
+          if (created) finish(created);
+        } catch (error) { finish(undefined, error); }
+      }
     };
     const observer = new MutationObserver(check);
     observer.observe(document.body, { childList: true, subtree: true });
@@ -164,6 +212,7 @@ export async function attachImages(composer: Composer, files: readonly File[], s
       }
     }, { capture: true, signal: operation.signal });
     timeout = setTimeout(() => finish(), 3000);
-    try { action.click(); check(); } catch (error) { finish(undefined, error); }
+    try { activate(action); check(); }
+    catch (error) { finish(undefined, error); }
   });
 }

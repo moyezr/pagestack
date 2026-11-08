@@ -81,6 +81,43 @@ test('later batches append to existing native images without re-uploading earlie
   await expect(page.locator('.native-images figure')).toHaveCount(3);
 });
 
+for (const mode of ['body-input', 'body-input-before-mount']) {
+  test(`current full-page LinkedIn flow handles ${mode} and accepts later pastes`, async ({ page }) => {
+    await page.goto(`https://www.linkedin.com/sharing/compose/?mode=${mode}`);
+    await page.locator('[role=dialog]').evaluate((dialog) => dialog.removeAttribute('role'));
+    let pickers = 0;
+    page.on('filechooser', () => pickers++);
+    await paste(page, [{ name: 'one.png' }, { name: 'two.png' }]);
+    await page.getByRole('button', { name: 'Add 2 images to post', exact: true }).click();
+    await expect(page.locator('.native-images figure')).toHaveCount(2);
+    expect(pickers).toBe(0);
+    await paste(page, [{ name: 'three.png' }], '[role=region]');
+    await page.getByRole('button', { name: 'Add image to post', exact: true }).click();
+    await expect(page.locator('.native-images figure')).toHaveCount(3);
+    expect((await uploads(page)).map((batch) => batch.map((file) => file.name))).toEqual([['one.png', 'two.png'], ['three.png']]);
+    expect(pickers).toBe(0);
+  });
+}
+
+test('attached albums use Edit then Add and retain their original images', async ({ page }) => {
+  await page.goto('https://www.linkedin.com/sharing/compose/?mode=album-edit');
+  await page.locator('[role=dialog]').evaluate((dialog) => dialog.removeAttribute('role'));
+  let pickers = 0;
+  page.on('filechooser', () => pickers++);
+  await paste(page, [{ name: 'new.png' }]);
+  await page.getByRole('button', { name: 'Add image to post', exact: true }).click();
+  await expect(page.locator('.native-images figure')).toHaveCount(3);
+  expect((await uploads(page))[0]?.map((file) => file.name)).toEqual(['new.png']);
+  expect(pickers).toBe(0);
+  await paste(page, [{ name: 'another.png' }], 'main');
+  await page.getByRole('button', { name: 'Add image to post', exact: true }).click();
+  await expect(page.locator('.native-images figure')).toHaveCount(4);
+  expect(await page.locator('.native-images figure').allTextContents()).toEqual(expect.arrayContaining([
+    'already-selected.png Remove', 'second-existing.png Remove', 'new.png Remove', 'another.png Remove',
+  ]));
+  expect(pickers).toBe(0);
+});
+
 test('removing an image updates the handoff and releases its object URL', async ({ page }) => {
   await paste(page, [{ name: 'remove.png' }, { name: 'keep.png' }]);
   const url = await page.getByRole('link', { name: 'Save image 1', exact: true }).getAttribute('href');
