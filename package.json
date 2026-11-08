@@ -12,6 +12,7 @@
     "dev": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && playwright test",
+    "test:live": "node scripts/live-test.mjs",
     "check": "npm run typecheck && npm test",
     "package": "npm run check && node scripts/package.mjs"
   },

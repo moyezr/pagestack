@@ -151,6 +151,12 @@ dependencies are missing. Watch mode rebuilds source; reload the extension in
 require restarting watch mode. Tests use a temporary browser profile and never
 touch your personal browser, LinkedIn account, or drafts.
 
+For manual testing in your signed-in browser, run `npm run test:live` and open
+the printed localhost URL. It provides three generated, non-sensitive images
+with **Copy image** buttons. Copy them one at a time and paste into an unpublished
+LinkedIn draft. This harness never publishes or accesses your account. Stop it
+with Ctrl+C when finished.
+
 ```sh
 npm run package
 ```
