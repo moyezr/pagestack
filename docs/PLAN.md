@@ -1,5 +1,33 @@
 # PasteStack implementation plan
 
+## Automatic paste update — 9 November 2026
+
+The default interaction changes to paste → native image upload → automatically
+advance Next → focus the post text. A toolbar popup offers an **Automatically add
+pasted images** checkbox, on by default. Turning it off restores the existing
+tray / Add to post / manual Next review flow. Publishing always remains manual.
+
+Use one local boolean in Chrome extension storage, not the page's localStorage.
+This adds only the `storage` permission and a static popup; no service worker,
+new host access, or runtime dependency. Read once on load and respond to storage
+change events. [Chrome storage documentation](https://developer.chrome.com/docs/extensions/reference/api/storage)
+and [popup documentation](https://developer.chrome.com/docs/extensions/develop/ui/add-popup)
+were checked for this change.
+
+Coalesce rapid pastes with a short, per-paste timer and serialize native upload
+transitions. Keep new clipboard files queued during an in-progress transition;
+never re-upload a batch after its FileList handoff. Auto-Next must target only a
+recognized image editor with native previews and an enabled Next button, then
+wait for the text composer to return. Bound observers/timeouts to active work,
+preserve files on recoverable failures, and cancel on composer dismissal.
+
+Verification: add browser coverage for default automatic behavior, persisted
+manual mode, switching settings without a reload, delayed Next readiness,
+repeated pastes during transitions, recovery without duplicate uploads, and
+cancellation without clicking Post. Retest separate real Cmd+V pastes and typing
+in the user's Chrome with a clearly labeled unpublished draft. Update packaging,
+permissions documentation, and release version to 0.2.0.
+
 ## Outcome
 
 A Chrome Manifest V3 extension for desktop LinkedIn. Open a post, paste an
