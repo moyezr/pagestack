@@ -2,16 +2,19 @@
 
 Paste several clipboard images into a LinkedIn post without saving each one first.
 
-**Cmd+V on Mac · Ctrl+V on Windows/Linux · one stack · one Add to post click.**
+**Cmd+V on Mac · Ctrl+V on Windows/Linux · paste and keep writing.**
 
-Each paste appends to a small tray inside the post composer. Review or remove
-images, then add the entire stack to LinkedIn as separate photos in one native
-multi-image post. LinkedIn handles the layout, image editing, alt text, and final
-publishing.
+By default, each paste adds images to LinkedIn, advances its image editor's Next
+button, and returns focus to the post text. Further pastes join the same native
+multi-image post. Images pasted during a transition are queued, so earlier files
+are preserved. Publishing remains your choice.
+
+Prefer to review first? Click the toolbar icon and turn off **Automatically add
+pasted images** to use the original image tray and manual Next flow.
 
 ![PasteStack in a controlled composer fixture](docs/preview.png)
 
-*Preview uses a controlled test composer, not an authenticated LinkedIn account.*
+*The optional manual-review tray, shown in a controlled test composer.*
 
 ## Install locally
 
@@ -28,23 +31,26 @@ npm run build
 3. Click **Load unpacked** and select this project's **dist** folder.
 4. Refresh your LinkedIn tab after saving any draft you want to keep.
 
-Alternatively, extract `artifacts/pastestack-0.1.0.zip` and load the extracted
+Alternatively, extract `artifacts/pastestack-0.2.0.zip` and load the extracted
 folder. Chrome cannot load the ZIP itself. No Chrome Web Store listing exists yet.
+For an existing local installation, click Reload on PasteStack's extension card,
+then refresh LinkedIn after saving any draft you want to keep.
 
 ## Use
 
 1. Open **Start a post** on LinkedIn, or visit its [post composer](https://www.linkedin.com/sharing/compose/).
 2. Copy an actual image: for example, use **Copy image** in your browser, or
    **Cmd+Ctrl+Shift+4** for a clipboard screenshot on Mac / **Win+Shift+S** on Windows.
-3. Click in the post editor and paste. A PasteStack tray appears.
-4. Copy another image and paste again. Each paste appends; earlier images remain.
-5. Click **Add images to post** when ready. Complete LinkedIn's image editor
-   (including **Next**, if shown), and verify every native preview before posting.
-6. Write your post and use LinkedIn's **Post** button when ready.
+3. Click in the post editor and paste. PasteStack adds the image and returns you
+   to writing automatically; neither Add to post nor Next requires a click.
+4. Copy another image and paste again. It joins the same post, preserving earlier
+   attachments. Pasting during a transition queues the new file.
+5. Type any text you want. Review the native previews and click LinkedIn's
+   **Post** button when ready.
 
-The Add button includes your image count. Repeating the exact same image is
-allowed intentionally. The tray never combines photos into a single bitmap.
-After handoff, use LinkedIn's own controls to remove, reorder, or edit attachments.
+Repeating the exact same image is allowed intentionally. Photos stay separate
+attachments. Use LinkedIn's **Edit** control to crop, add alt text, remove images,
+or reorder them before publishing.
 When adding a later batch to an existing album, LinkedIn may insert it after the
 currently selected photo. Use its native reorder controls if you want a different
 order; PasteStack preserves the existing photos and leaves native ordering intact.
@@ -58,25 +64,33 @@ Text-only pastes work normally. When a clipboard contains both an image file and
 text/HTML, PasteStack collects the image; paste accompanying text separately.
 Copying only an image URL does not fetch or attach the image.
 
-## Why an explicit Add step?
+## Automatic or manual review
 
-LinkedIn already supports some direct image pastes. Repeated pastes can interact
-with different post and image-editor screens. PasteStack collects a batch locally
-before asking LinkedIn to upload it, so earlier images are not uploaded repeatedly.
-The extension blocks the recognized Post button while an unadded stack remains;
-add the images or clear the stack first.
+Click PasteStack's toolbar icon to change **Automatically add pasted images**.
+It is **on by default**, persists on this computer, and updates open tabs without
+a reload. A batch already in progress finishes using the mode it started with.
+
+![PasteStack settings with automatic paste enabled](docs/settings.png)
+
+With automatic mode off, paste into the tray, review/remove images, click **Add
+images to post**, and complete **Next** yourself. Use this mode when you want to
+edit or add alt text before returning to the post. The extension blocks the
+recognized Post button while local images are pending or being transferred.
 
 ## Lightweight by construction
 
-- **About 13 KB** of minified JavaScript, with a hard **20 KiB** build budget.
+- **About 17.5 KB** of content-script JavaScript, with a hard **20 KiB** budget.
+  The settings popup adds about 0.6 KB of JavaScript and loads only when opened.
 - **Zero runtime dependencies**. TypeScript, esbuild, Playwright, and ZIP tooling
   are development tools; none ships inside the extension.
-- **No background process**, startup DOM scans, timers, or clipboard polling.
-- An idle tab has one paste listener. DOM observation exists only while a tray
-  is open or during a bounded, three-second upload handoff.
+- **No background process**, startup DOM scans, idle timers, or clipboard polling.
+- One settings read at startup and a storage-change listener keep the preference
+  current. A short 180 ms per-paste timer coalesces rapid pastes. Observers run
+  only while files are pending; upload handoff is bounded to three seconds and
+  returning through Next is bounded to fifteen seconds.
 - File references and blob URLs avoid base64 copies of original images.
-  Thumbnails are downsampled to 160 pixels wide, decoded one at a time, and their
-  image bitmaps are explicitly closed.
+  Manual/error thumbnails are downsampled to 160 pixels wide and decoded one at
+  a time. Automatic mode avoids decoding separate extension thumbnails.
 - Original and thumbnail URLs are revoked on removal, clear, successful handoff,
   composer close, or page exit. Images are not retained as clipboard history.
 
@@ -88,9 +102,10 @@ CPU/RAM benchmark on every computer.
 
 PasteStack runs only on **https://www.linkedin.com/**. Chrome will show site-access
 permission for LinkedIn because the extension needs to integrate with the composer.
-It requests no clipboardRead, storage, tabs, downloads, or other extension API
-permissions. It reads image files from the paste event you initiate, without
-inspecting clipboard text or HTML.
+The only extension API permission is **storage**, used for one local boolean
+preference. It requests no clipboardRead, tabs, or downloads permission. Images
+and post text are never written to storage. It reads image files from the paste
+event you initiate, without inspecting clipboard text or HTML.
 
 There is no server, analytics, tracking, private LinkedIn API integration, or
 extension-originated network request. Images live in tab memory until discarded
@@ -104,18 +119,27 @@ Targets current desktop Chrome on macOS and Windows; Chromium browsers may also
 work. No mobile, Safari, or Firefox support is claimed. Chrome 120 is the API
 compatibility floor; use an up-to-date browser.
 
-**Automated verification:** 31 browser tests passed locally on macOS using the
+**Automated verification:** 39 browser tests passed locally on macOS using the
 actual Manifest V3 extension loaded in Playwright's bundled Chromium. Coverage
 includes a real OS clipboard paste via Cmd+V, real FileList/change-event handoff,
 repeated and rapid pastes, native image preservation, lazy/modal upload inputs,
 object-URL cleanup, fallback downloads, and text/comment/message exclusions.
+The automatic-flow tests cover Next readiness, keyboard focus and text
+preservation, pastes during transitions, cancellation, safe timeout recovery,
+and the persisted popup preference.
 
-**Live verified on 8 November 2026:** in signed-in Chrome 156 on macOS, with
+**Manual flow live verified on 8 November 2026:** in signed-in Chrome 156 on macOS, with
 LinkedIn in English, separate real Cmd+V pastes produced one two-image native
 post preview. A later third paste joined the same post while retaining both
 earlier photos. Plain-text paste also worked. Nothing was published. This test
 caught and fixed LinkedIn's transient body-mounted upload input and its
 existing-album **Edit → Add** flow; regression tests cover both.
+
+**Automatic flow live verified on 9 November 2026:** with version 0.2.0 in the
+same Chrome/macOS setup, two separate Cmd+V pastes joined one native post without
+clicking Add or Next. Focus returned to the text editor and the typed sentence
+survived the second paste. Nothing was published. The toolbar preference was
+saved in both modes and restored to automatic. See [the verification notes](docs/VERIFY.md).
 
 This verifies the current `/sharing/compose` flow, not every LinkedIn experiment.
 Toolbar labels currently target English. Unknown layouts should be treated as
@@ -124,11 +148,11 @@ this repository is pushed. See [the verification record](docs/VERIFY.md) for sco
 
 ## If images do not attach
 
-If the Add button reports a timeout, your stack remains available while its
-composer stays open. Open LinkedIn's **Media** / **Add images** screen and retry
-where the same composer remains mounted, or click **Save** beneath each preview
-and select those files through LinkedIn's normal uploader. Keep the composer
-open until you have saved any images you need.
+If an upload handoff fails, automatic retries pause and remaining files stay in
+the tray for explicit retry or **Save**. If files were handed to LinkedIn but
+Next could not complete, finish Next manually. PasteStack does not re-upload
+the already handed-off batch. Keep the composer open until you have saved any
+queued files you need; closing it cancels pending work.
 
 The extension requires a multi-image input that accepts images. Some layouts
 may not expose one until you open their media editor. It cannot confirm a
@@ -169,13 +193,15 @@ npm run package
 ```
 
 Packaging type-checks, tests, builds, verifies host/permission constraints, and
-writes a ZIP containing only the manifest, content script, and three icons.
+writes a ZIP containing only the manifest, content script, three icons, and the
+static settings popup (HTML/CSS/JS).
 The ZIP is round-trip verified and its SHA-256 hash printed. CI repeats these
 checks on macOS, Windows, and Linux after pushing.
 
 All packages are exact-version pinned with a lockfile. Stable npm versions were
 checked on **7 November 2026**: TypeScript 7.0.2, esbuild 0.28.2, Playwright 1.65.0,
 and fflate 0.8.3 (packaging only). Node types target the supported Node 22 floor.
+Chrome type definitions 0.3.7 were checked and pinned on 9 November 2026.
 
 The adapter lives in `src/linkedin.ts`; clipboard rules are in
 `src/clipboard.ts`, lifecycle handling in `src/content.ts`, and isolated tray UI
