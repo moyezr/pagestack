@@ -5,3 +5,8 @@ playwright-report/
 test-results/
 .DS_Store
 *.log
+
+# Local environment values; keep a shareable template trackable.
+.env
+.env.*
+!.env.example
