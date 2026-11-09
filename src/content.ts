@@ -1,9 +1,10 @@
 import { imageFiles, MAX_IMAGES, validateImages } from './clipboard';
-import { attachImages, composerOpen, findComposer, isPublishButton, nativeImageCount } from './linkedin';
+import { attachImages, composerOpen, currentComposer, findComposer, finishImagePost, isComposerDismissal, isPublishButton, nativeImageCount } from './linkedin';
 import type { Composer } from './linkedin';
 import { Tray } from './tray';
 import type { ImageEntry } from './tray';
 import { makePreview } from './preview';
+import { observePreference, preferences, settingsReady } from './settings';
 
 let nextId = 0;
 let active: Stack | null = null;
@@ -11,112 +12,185 @@ let active: Stack | null = null;
 class Stack {
   readonly tray: Tray;
   readonly entries: ImageEntry[] = [];
+  busy = false;
+  private paused = false;
+  private following = false;
+  private flight: ImageEntry[] = [];
+  private nativeBeforeFlight = 0;
   private readonly lifecycle = new AbortController();
   private readonly observer: MutationObserver;
-  private busy = false;
+  private timer: ReturnType<typeof setTimeout> | undefined;
   private previews = Promise.resolve();
+  private readonly previewJobs = new WeakSet<ImageEntry>();
 
-  constructor(readonly composer: Composer) {
+  constructor(public composer: Composer) {
     this.tray = new Tray({
       remove: (id) => {
         const index = this.entries.findIndex((entry) => entry.id === id);
+        if (index < 0) return;
         const [entry] = this.entries.splice(index, 1);
-        if (entry) {
-          URL.revokeObjectURL(entry.url);
-          if (entry.preview) URL.revokeObjectURL(entry.preview);
-        }
-        if (this.entries.length === 0) this.destroy();
-        else this.tray.render(this.entries);
+        if (entry) this.release(entry);
+        if (!this.entries.length) this.destroy(); else this.render();
       },
       clear: () => this.destroy(),
       attach: () => { void this.attach(); },
     });
-    if (composer.editor) composer.editor.after(this.tray.host);
-    else composer.root.append(this.tray.host);
     this.observer = new MutationObserver(() => {
-      if (!this.busy && !composerOpen(composer)) this.destroy();
+      if (this.busy || composerOpen(this.composer)) return;
+      const next = this.following && currentComposer();
+      if (next) this.mount(next); else this.destroy();
     });
-    this.observer.observe(document.body, { childList: true, subtree: true });
-    this.observer.observe(composer.root, { attributes: true, attributeFilter: ['hidden', 'aria-hidden', 'style', 'class', 'open'] });
+    this.mount(composer);
     window.addEventListener('pagehide', () => this.destroy(), { once: true, signal: this.lifecycle.signal });
     document.addEventListener('click', (event) => {
-      if (!this.entries.length || !(event.target instanceof Element)) return;
+      if (!(event.target instanceof Element)) return;
       const button = event.target.closest('button');
-      if (button && composer.root.contains(button) && isPublishButton(button)) {
+      if (!button || button.closest('[data-pastestack]')) return;
+      const related = this.composer.root.contains(button) || currentComposer()?.root.contains(button);
+      if (related && isComposerDismissal(button)) { this.destroy(); return; }
+      if (related && (this.entries.length || this.busy) && isPublishButton(button)) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        this.tray.render(this.entries, 'Add your images to the post, or clear the stack before posting.', this.busy);
+        this.render(this.busy ? 'Wait for your images to finish, or clear the stack before posting.' : 'Add your images to the post, or clear the stack before posting.');
         this.tray.host.scrollIntoView({ block: 'nearest' });
       }
     }, { capture: true, signal: this.lifecycle.signal });
   }
 
+  mount(composer: Composer): void {
+    this.composer = composer;
+    if (composer.editor) composer.editor.after(this.tray.host);
+    else composer.root.append(this.tray.host);
+    this.observer.disconnect();
+    this.observer.observe(document.body, { childList: true, subtree: true });
+    this.observer.observe(composer.root, { attributes: true, attributeFilter: ['hidden', 'aria-hidden', 'style', 'class', 'open'] });
+  }
+
   push(files: File[]): void {
-    if (this.busy) {
-      this.tray.render(this.entries, 'Images are being added. Wait for LinkedIn’s preview, then paste again.', true);
-      return;
-    }
-    const error = validateImages(files, MAX_IMAGES - this.entries.length - nativeImageCount(this.composer.root));
-    if (error) { this.tray.render(this.entries, error); return; }
-    for (const file of files) {
-      const entry: ImageEntry = { id: ++nextId, file, url: URL.createObjectURL(file), preview: null };
-      this.entries.push(entry);
-      // One thumbnail decode at a time, preserving paste order under bursts.
+    const existing = this.busy
+      ? Math.max(nativeImageCount(this.composer.root), this.nativeBeforeFlight + this.flight.length)
+      : nativeImageCount(this.composer.root);
+    const error = validateImages(files, MAX_IMAGES - this.entries.length - existing);
+    if (error) { this.render(error); return; }
+    for (const file of files) this.entries.push({ id: ++nextId, file, url: URL.createObjectURL(file), preview: null });
+    this.render();
+    void settingsReady.then(() => this.settingsChanged());
+  }
+
+  settingsChanged(): void {
+    if (this.lifecycle.signal.aborted) return;
+    if (!this.busy) this.render();
+    this.schedule();
+  }
+
+  schedule(): void {
+    clearTimeout(this.timer);
+    if (this.lifecycle.signal.aborted || !preferences.autoPaste || this.busy || this.paused || !this.entries.length) return;
+    this.timer = setTimeout(() => { void this.attach(); }, 180);
+  }
+
+  private render(message = ''): void {
+    this.tray.render(this.entries, message || (this.busy
+      ? 'Adding images to LinkedIn. You can paste another image to queue it.'
+      : preferences.autoPaste && !this.paused ? 'Adding your images automatically…' : ''), this.busy);
+    if (preferences.autoPaste && !this.paused) return;
+    for (const entry of this.entries) {
+      if (this.previewJobs.has(entry)) continue;
+      this.previewJobs.add(entry);
       this.previews = this.previews.then(async () => {
         if (!this.entries.includes(entry)) return;
-        const url = await makePreview(file, this.lifecycle.signal);
+        const url = await makePreview(entry.file, this.lifecycle.signal);
         if (!url) return;
         if (!this.entries.includes(entry) || this.lifecycle.signal.aborted) { URL.revokeObjectURL(url); return; }
         entry.preview = url;
         this.tray.updatePreview(entry);
       });
     }
-    this.tray.render(this.entries);
   }
 
   private async attach(): Promise<void> {
-    if (this.busy || !this.entries.length) return;
-    const error = validateImages(this.entries.map((entry) => entry.file), MAX_IMAGES - nativeImageCount(this.composer.root));
-    if (error) { this.tray.render(this.entries, error); return; }
+    if (this.busy || !this.entries.length || this.lifecycle.signal.aborted) return;
+    clearTimeout(this.timer);
     this.busy = true;
-    this.tray.render(this.entries, 'Handing images to LinkedIn. Check its previews before posting.', true);
+    await settingsReady;
+    if (this.lifecycle.signal.aborted) return;
+    const automatic = preferences.autoPaste;
+    const batch = this.entries.splice(0);
+    this.flight = batch;
+    this.nativeBeforeFlight = nativeImageCount(this.composer.root);
+    let handedOff = false;
+    let failure = '';
+    this.paused = false;
+    this.following = true;
+    this.render();
     try {
-      await attachImages(this.composer, this.entries.map((entry) => entry.file), this.lifecycle.signal);
-      this.destroy();
+      const files = batch.map((entry) => entry.file);
+      const error = validateImages(files, MAX_IMAGES - this.nativeBeforeFlight);
+      if (error) throw new Error(error);
+      await attachImages(this.composer, files, this.lifecycle.signal);
+      handedOff = true;
+      batch.forEach((entry) => this.release(entry));
+      if (automatic) {
+        const post = await finishImagePost(this.lifecycle.signal, this.nativeBeforeFlight + batch.length);
+        this.mount(post);
+        const editor = post.editor!;
+        editor.focus({ preventScroll: true });
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(false);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      } else {
+        const next = currentComposer();
+        if (next) this.mount(next);
+      }
     } catch (error) {
       if (this.lifecycle.signal.aborted) return;
+      if (!handedOff) this.entries.unshift(...batch);
+      this.paused = true;
+      failure = error instanceof Error ? error.message : 'Could not add images. Try again or save them below.';
+      const next = currentComposer();
+      if (next) this.mount(next);
+    } finally {
+      this.flight = [];
       this.busy = false;
-      if (!composerOpen(this.composer)) { this.destroy(); return; }
-      this.tray.render(this.entries, error instanceof Error ? error.message : 'Could not add images. Try again or save them below.');
+      if (!this.lifecycle.signal.aborted) {
+        if (!this.entries.length && !this.paused) this.destroy();
+        else { this.render(failure); this.schedule(); }
+      }
     }
+  }
+
+  private release(entry: ImageEntry): void {
+    URL.revokeObjectURL(entry.url);
+    if (entry.preview) URL.revokeObjectURL(entry.preview);
   }
 
   destroy(): void {
     this.lifecycle.abort();
+    clearTimeout(this.timer);
     this.observer.disconnect();
-    for (const entry of this.entries) {
-      URL.revokeObjectURL(entry.url);
-      if (entry.preview) URL.revokeObjectURL(entry.preview);
-    }
+    [...this.entries, ...this.flight].forEach((entry) => this.release(entry));
     this.entries.length = 0;
     this.tray.destroy();
     if (active === this) active = null;
   }
 }
 
-// No clipboard polling, keyboard hooks, global DOM observer, or work at startup.
+observePreference(() => active?.settingsChanged());
+
 document.addEventListener('paste', (event: ClipboardEvent) => {
   const files = imageFiles(event.clipboardData);
   if (!files.length) return;
-  const target = event.composedPath()[0] ?? event.target;
-  const composer = target instanceof Element && active?.tray.host.contains(target)
-    ? active.composer : findComposer(event.target);
-  // A Shadow DOM control's event target is retargeted to the host.
-  const resolved = composer ?? (event.target === active?.tray.host ? active.composer : null);
-  if (!resolved) return;
+  const inTray = event.target === active?.tray.host;
+  const resolved = inTray ? active!.composer : findComposer(event.target);
+  const transition = active?.busy && event.target === document.body && /^\/sharing\/compose\/?$/.test(location.pathname);
+  if (!resolved && !transition) return;
   event.preventDefault();
-  event.stopImmediatePropagation(); // LinkedIn must not also process this image.
-  if (active && active.composer.root !== resolved.root) active.destroy();
-  active ??= new Stack(resolved);
+  event.stopImmediatePropagation();
+  if (active && resolved && active.composer.root !== resolved.root && !active.busy) active.destroy();
+  active ??= new Stack(resolved!);
+  if (resolved && active.composer.root !== resolved.root) active.mount(resolved);
   active.push(files);
 }, { capture: true });

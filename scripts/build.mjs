@@ -8,8 +8,8 @@ const pkg = JSON.parse(await readFile('package.json', 'utf8'));
 const manifest = JSON.parse(await readFile('public/manifest.json', 'utf8'));
 if (manifest.version !== pkg.version) throw new Error('Package and manifest versions must match.');
 const options = {
-  entryPoints: ['src/content.ts'],
-  outfile: 'dist/content.js',
+  entryPoints: { content: 'src/content.ts', popup: 'src/popup.ts' },
+  outdir: 'dist',
   bundle: true,
   minify: true,
   target: 'chrome120',

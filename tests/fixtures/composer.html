@@ -38,6 +38,7 @@
   window.uploads = [];
   window.published = 0;
   window.nativePastes = 0;
+  window.nextClicks = 0;
   document.addEventListener('paste', () => window.nativePastes++);
   document.querySelector('#post').onclick = () => window.published++;
   document.querySelector('#close').onclick = () => document.querySelector('[role=dialog]').remove();
@@ -71,11 +72,21 @@
     input.addEventListener('change', () => {
       window.uploads.push(Array.from(input.files, file => ({ name: file.name, type: file.type, size: file.size })));
       Array.from(input.files).forEach(file => addNative(file, root));
+      if (mode.startsWith('auto')) {
+        const next = root.querySelector('[data-next]');
+        root.setAttribute('aria-busy', 'true');
+        next.disabled = true;
+        if (mode !== 'auto-stuck') setTimeout(() => {
+          root.removeAttribute('aria-busy');
+          next.disabled = false;
+        }, mode === 'auto-delayed' ? 450 : 60);
+      }
     });
     root.append(input);
     return input;
   };
   const root = document.querySelector('[role=dialog]');
+  if (mode.startsWith('auto')) root.removeAttribute('role');
   if (mode === 'static' || mode === 'existing') makeInput(root);
   if (mode === 'existing' || mode === 'album-edit') addNative({ name: 'already-selected.png' }, root);
   if (mode === 'album-edit') {
@@ -87,7 +98,29 @@
   }
   document.querySelector('#media').onclick = () => {
     if (mode === 'broken') return;
-    if (mode === 'album-edit') {
+    if (mode.startsWith('auto')) {
+      const post = root.closest('main');
+      const gallery = root.querySelector('.native-images');
+      const parent = gallery.parentElement;
+      const sibling = gallery.nextSibling;
+      const media = document.createElement('main');
+      media.innerHTML = '<h2>Editor</h2><div class="native-images"></div><button aria-label="Add">Add</button><button data-next disabled>Next</button><button aria-label="Dismiss">Dismiss</button>';
+      media.querySelector('.native-images').replaceWith(gallery);
+      post.replaceWith(media);
+      const add = () => {
+        const input = makeInput(media);
+        document.body.append(input);
+        input.click();
+      };
+      media.querySelector('[aria-label=Add]').onclick = add;
+      media.querySelector('[data-next]').onclick = () => {
+        window.nextClicks++;
+        parent.insertBefore(gallery, sibling);
+        media.replaceWith(post);
+      };
+      media.querySelector('[aria-label=Dismiss]').onclick = () => media.remove();
+      add();
+    } else if (mode === 'album-edit') {
       const media = document.createElement('main');
       media.innerHTML = '<h2>Editor</h2><div class="native-images"></div><button aria-label="Add">Add</button><button>Next</button>';
       media.querySelector('.native-images').replaceWith(root.querySelector('.native-images'));

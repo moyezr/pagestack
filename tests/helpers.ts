@@ -4,7 +4,17 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-export const test = base.extend<{ page: Page }, { extensionContext: BrowserContext }>({
+const extensionOrigins = new WeakMap<BrowserContext, string>();
+
+export async function openSettings(context: BrowserContext): Promise<Page> {
+  const popup = await context.newPage();
+  await popup.goto(`${extensionOrigins.get(context)}/popup.html`);
+  await expect(popup.getByRole('checkbox')).toBeEnabled();
+  return popup;
+}
+
+export const test = base.extend<{ page: Page; automatic: boolean | null }, { extensionContext: BrowserContext }>({
+  automatic: [false, { option: true }],
   extensionContext: [async ({}, use) => {
     const profile = await mkdtemp(join(tmpdir(), 'pastestack-tests-'));
     const extension = resolve('dist');
@@ -15,11 +25,26 @@ export const test = base.extend<{ page: Page }, { extensionContext: BrowserConte
       viewport: { width: 1100, height: 900 },
     });
     const html = await readFile('tests/fixtures/composer.html', 'utf8');
-    await context.route('**/*', (route) => route.fulfill({ contentType: 'text/html', body: html }));
+    await context.route(/^https:\/\//, (route) => route.fulfill({ contentType: 'text/html', body: html }));
+    const probe = await context.newPage();
+    const cdp = await context.newCDPSession(probe);
+    const origin = new Promise<string>((resolve) => cdp.on('Runtime.executionContextCreated', ({ context }) => {
+      if (context.name === 'PasteStack' && context.origin.startsWith('chrome-extension://')) resolve(context.origin);
+    }));
+    await cdp.send('Runtime.enable');
+    await probe.goto('https://www.linkedin.com/feed/');
+    extensionOrigins.set(context, await origin);
+    await probe.close();
     try { await use(context); }
     finally { await context.close(); await rm(profile, { recursive: true, force: true }); }
   }, { scope: 'worker' }],
-  page: async ({ extensionContext }, use) => {
+  page: async ({ extensionContext, automatic }, use) => {
+    const settings = await openSettings(extensionContext);
+    await settings.evaluate(async (automatic) => {
+      if (automatic === null) await chrome.storage.local.remove('autoPaste');
+      else await chrome.storage.local.set({ autoPaste: automatic });
+    }, automatic);
+    await settings.close();
     const page = await extensionContext.newPage();
     await page.goto('https://www.linkedin.com/feed/?mode=static');
     try { await use(page); } finally { await page.close(); }

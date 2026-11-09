@@ -1,9 +1,11 @@
 {
   "manifest_version": 3,
   "name": "PasteStack",
-  "version": "0.1.0",
-  "description": "Paste clipboard images into one LinkedIn image stack. Review, then add them to your post together.",
+  "version": "0.2.0",
+  "description": "Paste images into LinkedIn posts automatically. Keep writing, or switch to manual image review.",
   "minimum_chrome_version": "120",
+  "permissions": ["storage"],
+  "action": { "default_title": "PasteStack settings", "default_popup": "popup.html" },
   "icons": {
     "16": "icons/16.png",
     "48": "icons/48.png",

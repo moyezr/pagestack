@@ -21,6 +21,7 @@ function label(element: Element): string {
 }
 
 export function isPublishButton(element: Element): boolean {
+  if (/^next$/i.test(label(element))) return false;
   return element.matches('.share-actions__primary-action') || /^(post|publish)$/i.test(label(element));
 }
 
@@ -69,6 +70,23 @@ function fullPageMediaRoot(): HTMLElement | null {
   return null;
 }
 
+function mediaRoots(): HTMLElement[] {
+  const fullPage = fullPageMediaRoot();
+  return [...(fullPage ? [fullPage] : []), ...Array.from(document.querySelectorAll<HTMLElement>(DIALOG))
+    .filter((root) => visible(root) && isMediaRoot(root))];
+}
+
+export function currentComposer(): Composer | null {
+  const media = mediaRoots()[0];
+  if (media) return { root: media, editor: null };
+  const editor = postEditor(document.body);
+  return editor ? findComposer(editor) : null;
+}
+
+export function isComposerDismissal(element: Element): boolean {
+  return /^(dismiss|close(?: dialog| editor| composer)?|back|discard)$/i.test(label(element));
+}
+
 export function findComposer(target: EventTarget | null): Composer | null {
   if (!(target instanceof Element) || target.closest(EXCLUDED)) return null;
   const dialog = target.closest<HTMLElement>(DIALOG);
@@ -99,10 +117,56 @@ export function composerOpen(composer: Composer): boolean {
 }
 
 export function nativeImageCount(root: HTMLElement): number {
+  const thumbnails = root.querySelectorAll('[role="button"][aria-roledescription="sortable"]').length;
+  if (thumbnails) return thumbnails;
   // Use remove controls, not <img>: avatars and editor thumbnails double-count.
   return Array.from(root.querySelectorAll('button')).filter((button) =>
     /^(remove|delete) (image|photo)(?:\s.*)?$/i.test(label(button)),
   ).length;
+}
+
+/** Advance only a recognized photo editor, then wait for a writable composer.
+ * No Post/Publish action is ever selected or clicked. */
+export async function finishImagePost(signal: AbortSignal, minimumImages: number): Promise<Composer> {
+  signal.throwIfAborted();
+  return new Promise<Composer>((resolve, reject) => {
+    let advanced = false;
+    let settled = false;
+    const observer = new MutationObserver(check);
+    const timeout = setTimeout(() => finish(undefined, new Error('Images were sent to LinkedIn. Finish Next manually to continue.')), 15_000);
+    const cancel = () => finish(undefined, signal.reason);
+    function finish(composer?: Composer, error?: unknown) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      observer.disconnect();
+      signal.removeEventListener('abort', cancel);
+      if (composer) resolve(composer); else reject(error);
+    }
+    function check() {
+      if (settled) return;
+      if (signal.aborted) { cancel(); return; }
+      const media = mediaRoots()[0];
+      if (media) {
+        const previews = nativeImageCount(media) > 0 || !!media.querySelector('img[alt*="preview" i], .image-sharing-detour-container img');
+        const next = Array.from(media.querySelectorAll<HTMLButtonElement>('button'))
+          .find((button) => label(button) === 'Next' && !button.disabled && button.getAttribute('aria-disabled') !== 'true' && visible(button));
+        if (!advanced && previews && next && !media.querySelector('[role="progressbar"], progress, [aria-busy="true"]')) {
+          advanced = true;
+          next.click();
+          queueMicrotask(check);
+        }
+        return;
+      }
+      const composer = currentComposer();
+      if (composer?.editor && (advanced || nativeImageCount(composer.root) >= minimumImages) &&
+        !composer.root.querySelector('[role="progressbar"], progress, [aria-busy="true"]')) finish(composer);
+    }
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true,
+      attributeFilter: ['disabled', 'aria-disabled', 'aria-busy', 'hidden', 'aria-hidden'] });
+    signal.addEventListener('abort', cancel, { once: true });
+    check();
+  });
 }
 
 function mediaAction(root: HTMLElement): HTMLElement | null {

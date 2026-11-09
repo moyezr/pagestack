@@ -6,9 +6,10 @@ import { zipSync, unzipSync } from 'fflate';
 const manifest = JSON.parse(await readFile('dist/manifest.json', 'utf8'));
 const pkg = JSON.parse(await readFile('package.json', 'utf8'));
 if (manifest.manifest_version !== 3 || manifest.version !== pkg.version) throw new Error('Invalid release manifest.');
-if (manifest.background || manifest.permissions?.length || manifest.host_permissions?.length) {
+if (manifest.background || JSON.stringify(manifest.permissions) !== JSON.stringify(['storage']) || manifest.host_permissions?.length) {
   throw new Error('Unexpected background process or extra permissions. Review the privacy contract before packaging.');
 }
+if (manifest.action?.default_popup !== 'popup.html') throw new Error('Missing settings popup.');
 if (JSON.stringify(manifest.content_scripts[0].matches) !== JSON.stringify(['https://www.linkedin.com/*'])) {
   throw new Error('Unexpected host access.');
 }
@@ -21,7 +22,7 @@ async function collect(directory) {
   }
 }
 await collect('dist');
-const expected = ['content.js', 'icons/128.png', 'icons/16.png', 'icons/48.png', 'manifest.json'];
+const expected = ['content.js', 'icons/128.png', 'icons/16.png', 'icons/48.png', 'manifest.json', 'popup.css', 'popup.html', 'popup.js'];
 if (JSON.stringify(Object.keys(files).sort()) !== JSON.stringify(expected)) throw new Error('Unexpected extension files.');
 const zip = zipSync(files, { level: 9 });
 const unpacked = unzipSync(zip);
